@@ -1,0 +1,16 @@
+# Python virtual environment created by install.ps1
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local state that must never be committed: the runtime file holds the daemon's
+# IPC auth token, and logs can contain transcribed text.
+*.log
+daemon.json
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

@@ -1,0 +1,47 @@
+{
+  "_comment": "Copy to %APPDATA%\\wisprflow\\config.json to override defaults. Only keys listed in wf_paths.DEFAULTS are read; anything else is ignored (and reported in the log). The setup wizard writes this file for you — edit it by hand only for the knobs it does not ask about.",
+
+  "asr_model": "large-v3",
+  "asr_device": "auto",
+  "asr_compute_type": "int8",
+  "asr_gpu_compute_type": "int8_float16",
+  "gpu_idle_timeout_s": 1800,
+  "language": "en",
+  "beam_size": 5,
+  "initial_prompt": "",
+
+  "input_device": null,
+  "auto_stop": false,
+  "vad_rms_threshold": 0.010,
+  "silence_ms": 900,
+  "max_seconds": 120,
+
+  "llm_enable": true,
+  "ollama_url": "http://127.0.0.1:11434",
+  "ollama_isolated": false,
+  "ollama_manage": true,
+  "llm_model": "gemma3:4b",
+  "llm_keep_alive": "5m",
+  "llm_temperature": 0.0,
+
+  "inject_method": "type",
+  "paste_chord": "ctrl+v",
+  "key_delay_ms": 1,
+  "restore_clipboard": true,
+  "trailing_space": true,
+
+  "hotkey": "ctrl+alt+space",
+  "hotkey_cancel": "ctrl+alt+x",
+  "doubletap_ms": 400,
+
+  "note_mode": false,
+
+  "meeting_dir": "~/Documents/wf-meetings",
+  "meeting_vad_floor": 0.02,
+  "meeting_silence_ms": 700,
+  "meeting_beam_size": 3,
+  "meeting_loopback_device": null,
+
+  "overlay": true,
+  "tray": true
+}

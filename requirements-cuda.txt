@@ -1,0 +1,6 @@
+# Optional GPU acceleration for faster-whisper on an NVIDIA card.
+# Installed by wf_setup.py when it detects a GPU. These are the CUDA 12 runtime libraries
+# ctranslate2 links against; wf_cuda.py registers their DLL directories at startup, which is
+# the Windows equivalent of the Linux launcher's LD_LIBRARY_PATH.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

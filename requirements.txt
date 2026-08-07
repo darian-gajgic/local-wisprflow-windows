@@ -1,0 +1,6 @@
+# Runtime dependencies for local-wisprflow (Windows).
+# faster-whisper pulls in ctranslate2, tokenizers, huggingface-hub, onnxruntime and av.
+faster-whisper>=1.1.0
+sounddevice>=0.4.6
+numpy>=1.24
+requests>=2.31
