@@ -79,7 +79,12 @@ function Confirm-Step($Question, $DefaultYes = $true) {
 # ---------------------------------------------------------------------------
 function Get-PythonVersion($Exe, $PreArgs = @()) {
     try {
-        $out = & $Exe @PreArgs '-c' 'import sys;print("%d.%d"%sys.version_info[:2])' 2>$null
+        # The Python snippet must quote with SINGLE quotes. Windows PowerShell 5.1 strips
+        # double quotes out of an argument on its way to a native executable, so
+        # print("%d.%d"%...) arrives as print(%d.%d%...) and dies with a SyntaxError —
+        # which this function would report as "no Python here" for every interpreter on
+        # the machine, and the installer would then reinstall Python and still find none.
+        $out = & $Exe @PreArgs '-c' "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null
         if ($LASTEXITCODE -eq 0 -and $out) { return $out.Trim() }
     } catch { }
     return $null
@@ -248,7 +253,10 @@ $cfgHotkey = 'Ctrl + Alt + Space'
 try {
     # PYTHONPATH rather than a cwd change: the installer may be invoked from anywhere,
     # and `python -c` only puts the *current* directory on sys.path.
-    $probe = 'import wf_paths,wf_hotkey;print(wf_hotkey.describe(wf_paths.load_config().get("hotkey","")))'
+    # Single quotes inside — see the note in Get-PythonVersion. With double quotes this
+    # always failed and the summary below then advertised the DEFAULT hotkey rather than
+    # the configured one.
+    $probe = "import wf_paths,wf_hotkey;print(wf_hotkey.describe(wf_paths.load_config().get('hotkey','')))"
     $env:PYTHONPATH = $Root
     $got = & $VenvPy -c $probe 2>$null
     Remove-Item Env:\PYTHONPATH -ErrorAction SilentlyContinue
