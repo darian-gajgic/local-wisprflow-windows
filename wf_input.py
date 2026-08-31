@@ -131,6 +131,19 @@ def _init_signatures() -> None:
     _user32.GetWindowTextLengthW.restype = ctypes.c_int
     _user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
     _user32.GetWindowTextW.restype = ctypes.c_int
+    _user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+    _user32.SetForegroundWindow.restype = wintypes.BOOL
+    _user32.IsWindow.argtypes = (wintypes.HWND,)
+    _user32.IsWindow.restype = wintypes.BOOL
+    _user32.BringWindowToTop.argtypes = (wintypes.HWND,)
+    _user32.BringWindowToTop.restype = wintypes.BOOL
+    _user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND,
+                                                 ctypes.POINTER(wintypes.DWORD))
+    _user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    _user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BOOL)
+    _user32.AttachThreadInput.restype = wintypes.BOOL
+    _kernel32.GetCurrentThreadId.argtypes = ()
+    _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 
 if IS_WINDOWS:
@@ -325,6 +338,66 @@ def foreground_window_title() -> str:
     buf = ctypes.create_unicode_buffer(n + 1)
     _user32.GetWindowTextW(hwnd, buf, n + 1)
     return buf.value
+
+
+def foreground_window():
+    """HWND of the focused window, or None. The dictation target, captured before any of
+    wisprflow's own windows appear."""
+    if not IS_WINDOWS:
+        return None
+    return _user32.GetForegroundWindow() or None
+
+
+def window_pid(hwnd) -> int:
+    """PID owning `hwnd`, or 0. Lets a caller tell its own windows from the user's."""
+    if not IS_WINDOWS or not hwnd:
+        return 0
+    try:
+        pid = wintypes.DWORD()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return int(pid.value)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def restore_foreground(hwnd) -> bool:
+    """Put `hwnd` back in the foreground. True if it ended up focused.
+
+    Needed because SendInput has no target parameter — it goes to whatever is focused *at
+    that instant*. Anything that steals focus between the hotkey press and the injection
+    (the overlay realizing its Tk window is the usual culprit) would otherwise redirect the
+    dictation into the wrong window, or into nothing at all.
+
+    SetForegroundWindow is deliberately restricted: Windows refuses it from a process that
+    does not already own the foreground, precisely so background apps cannot steal focus.
+    The documented way through is to attach to the foreground thread's input queue first,
+    which makes the two threads share focus state and lifts the restriction for the call.
+    """
+    if not IS_WINDOWS or not hwnd:
+        return False
+    try:
+        if not _user32.IsWindow(hwnd):
+            return False          # the user closed it while we were transcribing
+        if _user32.GetForegroundWindow() == hwnd:
+            return True
+        if _user32.SetForegroundWindow(hwnd) and _user32.GetForegroundWindow() == hwnd:
+            return True
+        fg = _user32.GetForegroundWindow()
+        if not fg:
+            return False
+        cur = _kernel32.GetCurrentThreadId()
+        other = _user32.GetWindowThreadProcessId(fg, None)
+        if not other or other == cur:
+            return False
+        _user32.AttachThreadInput(cur, other, True)
+        try:
+            _user32.BringWindowToTop(hwnd)
+            _user32.SetForegroundWindow(hwnd)
+        finally:
+            _user32.AttachThreadInput(cur, other, False)
+        return _user32.GetForegroundWindow() == hwnd
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def is_elevated() -> bool:

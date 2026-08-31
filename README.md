@@ -191,8 +191,14 @@ model loads or unloads. The GPU model is released after 30 minutes of inactivity
   another combination, or switch to `doubletap:`.
 - **First start is slow.** The speech model has to load into memory (~10–30 s). The tray icon
   appears immediately; the hotkey works once the log says `ready`.
-- **The overlay never takes focus** (`WS_EX_NOACTIVATE`), which is what keeps dictated text
-  going to your editor rather than to the pill.
+- **The overlay gives focus straight back.** `WS_EX_NOACTIVATE` keeps the pill out of Alt-Tab
+  and stops a click activating it, but it does *not* stop Tk taking the foreground when it
+  realizes the window — that happens inside `update_idletasks`, before any show call, and
+  before the style can be applied to a window that does not exist yet. So the overlay records
+  the focused window before tkinter starts and restores it within a few milliseconds. As a
+  second guarantee the daemon pins the target window when recording begins and refocuses it
+  immediately before injecting, so the text lands where you were typing even if something else
+  steals focus while it transcribes.
 
 ## Requirements
 

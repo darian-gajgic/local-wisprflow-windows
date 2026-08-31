@@ -778,6 +778,13 @@ class Daemon:
     # -- session --------------------------------------------------------------
     def run_session(self) -> None:
         try:
+            # The window to dictate INTO, captured before any of our own windows exist.
+            # SendInput has no target argument — it types into whatever is focused at that
+            # instant — so the target is pinned here and restored just before injecting.
+            # Without this, anything that takes focus between the keypress and the
+            # injection (our own overlay, a notification, a slow app repaint) silently
+            # redirects the dictation somewhere the user never asked for.
+            target_hwnd = wf_input.foreground_window()
             self._overlay_start()  # animated listening pill
             audio = self.record()
             # Atomically decide cancel-vs-proceed under the lock so a `cancel` arriving exactly
@@ -802,6 +809,12 @@ class Daemon:
             final = format_notes(polished) if note else polished
             if note:
                 log(f"note mode: {final.count(chr(10)) + 1} line(s)")
+            # Put the caret back where the user left it before typing into it. Harmless
+            # when focus never moved (it returns immediately if the window is already
+            # foreground); decisive when it did.
+            if target_hwnd and not wf_input.restore_foreground(target_hwnd):
+                log(f"could not refocus the original window ({target_hwnd}); "
+                    "injecting into whatever is focused now")
             used = self.inject(final, trailing="newline" if note else None)
             self._overlay_stop()
             self._overlay_done("Copied · Ctrl+V" if used == "clipboard" else final)

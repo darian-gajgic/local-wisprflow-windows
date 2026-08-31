@@ -35,12 +35,56 @@ import math
 import os
 import signal
 import sys
+import threading
 import time
 import tkinter as tk
 import tkinter.font as tkfont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import wf_input  # noqa: E402
 import wf_ipc  # noqa: E402
+
+# The window the user was typing in, captured BEFORE tkinter exists. Tk grabs the
+# foreground the moment it realizes its toplevel (inside update_idletasks, before any
+# deiconify/show call and even while the window is withdrawn), and no combination of
+# WS_EX_NOACTIVATE or SWP_NOACTIVATE prevents that — the styles can only be applied to a
+# window that already exists. So the pill takes the foreground for a few milliseconds and
+# hands it straight back.
+PREV_FOREGROUND = wf_input.foreground_window()
+
+
+def give_focus_back() -> None:
+    """Return the foreground to whatever had it before this overlay started."""
+    try:
+        wf_input.restore_foreground(PREV_FOREGROUND)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _focus_guard() -> None:
+    """Undo our own focus theft within a few ms, for as long as the window is settling.
+
+    Tk grabs the foreground at whatever moment it realizes the toplevel — sometimes while
+    measuring fonts, sometimes at update_idletasks — so a fixed set of give_focus_back()
+    calls leaves a race. This polls instead, and bounds the theft to the poll interval.
+
+    It only ever acts when the thief is a window of THIS process: a deliberate app switch
+    by the user during recording must be left alone, or the pill would fight the user for
+    the foreground. It also stops after a short settling period for the same reason.
+    """
+    end = time.time() + 1.5
+    while time.time() < end:
+        try:
+            fg = wf_input.foreground_window()
+            if fg and fg != PREV_FOREGROUND and wf_input.window_pid(fg) == os.getpid():
+                wf_input.restore_foreground(PREV_FOREGROUND)
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.003)
+
+
+if PREV_FOREGROUND:
+    threading.Thread(target=_focus_guard, name="wf-focus-guard", daemon=True).start()
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "listening"
 TEXT = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -128,20 +172,58 @@ def system_dpi_scale() -> float:
         return 1.0
 
 
+def _toplevel_hwnd(root):
+    """The real top-level HWND behind a Tk root (Tk nests its window inside a wrapper)."""
+    user32 = ctypes.windll.user32
+    hwnd = root.winfo_id()
+    return user32.GetParent(hwnd) or hwnd
+
+
+def show_without_activating(root) -> None:
+    """Map the pill WITHOUT handing it the foreground.
+
+    WS_EX_NOACTIVATE is necessary but NOT sufficient, and that is the whole bug: the style
+    stops the *user* activating the window by clicking it, but says nothing about the
+    program doing it. Tk's deiconify() maps the window via ShowWindow(SW_RESTORE), which
+    activates it — so every time the pill appeared, the user's editor was deactivated and
+    the caret went away. SendInput then delivered the dictated text to whatever had focus
+    instead, i.e. nowhere useful.
+
+    SetWindowPos with SWP_NOACTIVATE|SWP_SHOWWINDOW shows and stacks the window while
+    leaving the foreground exactly where it was. Tk still paints it: the canvas redraws on
+    WM_PAINT and the animation timers are ordinary root.after() callbacks, neither of which
+    cares what `wm state` thinks.
+    """
+    if not IS_WINDOWS:
+        root.deiconify()
+        return
+    try:
+        user32 = ctypes.windll.user32
+        # ctypes.* only: this module does not import ctypes.wintypes, and a NameError here
+        # would be swallowed by the except below and fall back to the activating path.
+        user32.SetWindowPos.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+                                        ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_uint)
+        user32.SetWindowPos.restype = ctypes.c_int
+        SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0001, 0x0002, 0x0010, 0x0040
+        HWND_TOPMOST = ctypes.c_void_p(-1)
+        user32.SetWindowPos(ctypes.c_void_p(_toplevel_hwnd(root)), HWND_TOPMOST, 0, 0, 0, 0,
+                            SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
+    except Exception:  # noqa: BLE001
+        root.deiconify()   # visible-but-stealing beats invisible
+
+
 def make_non_activating(root) -> None:
     """Stamp WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW on the toplevel.
 
-    Without NOACTIVATE, showing the pill steals focus from whatever the user was typing in —
-    and SendInput always targets the *focused* window, so the dictated text would land in the
-    overlay instead of their editor.
+    Keeps the pill out of Alt-Tab and stops a click on it activating it. Showing it without
+    activation is a separate problem — see show_without_activating().
     """
     if not IS_WINDOWS:
         return
     try:
         user32 = ctypes.windll.user32
-        hwnd = root.winfo_id()
-        parent = user32.GetParent(hwnd)
-        hwnd = parent or hwnd
+        hwnd = _toplevel_hwnd(root)
         GWL_EXSTYLE = -20
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW = 0x08000000, 0x00000080
         # The *Ptr variants only exist on 64-bit Windows; on 32-bit the plain ones are
@@ -202,6 +284,9 @@ F_TITLE = tkfont.Font(root=root, family=FAM, size=-S(14), weight="bold")
 F_SUB   = tkfont.Font(root=root, family=FAM, size=-S(9))
 F_BTN   = tkfont.Font(root=root, family=FAM, size=-S(11), weight="bold")
 F_DONE  = tkfont.Font(root=root, family=FAM, size=-S(12))
+# Enumerating font families and measuring text forces Tk to realize the toplevel, which is
+# the moment it takes the foreground — earlier than the explicit update_idletasks() below.
+give_focus_back()
 
 
 def round_rect(c, x1, y1, x2, y2, r, **kw):
@@ -485,7 +570,14 @@ else:
 
 
 root.update_idletasks()
+give_focus_back()               # update_idletasks() is where Tk takes the foreground
 make_non_activating(root)
-root.deiconify()
+show_without_activating(root)   # NOT deiconify(): that activates too
 make_non_activating(root)   # re-apply: Tk can recreate the frame when the window is mapped
+give_focus_back()
+# Once more from inside the event loop: Tk can still touch the window as it settles
+# (attribute re-application, the first WM_PAINT), and a late steal would be the one the
+# user actually notices.
+root.after(60, give_focus_back)
+root.after(250, give_focus_back)
 root.mainloop()
