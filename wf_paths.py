@@ -161,6 +161,9 @@ DEFAULTS: dict = {
 
     # --- hotkey ---------------------------------------------------------------
     # "ctrl+alt+space"        -> a normal global hotkey (RegisterHotKey)
+    # "num-"                  -> a single dedicated key, no modifier. Numpad keys and F13-F24
+    #                            qualify (wf_hotkey.SOLO_KEYS); the key is then swallowed
+    #                            system-wide, so pick one you do not type with.
     # "doubletap:rctrl"       -> tap Right Ctrl twice quickly (Wispr-Flow style; needs a
     #                            low-level keyboard hook). Also: lctrl, rshift, lshift, ralt.
     "hotkey": "ctrl+alt+space",

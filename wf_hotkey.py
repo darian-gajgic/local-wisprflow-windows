@@ -8,6 +8,10 @@ Windows gives us two better mechanisms, and this module supports both in a singl
 * ``"ctrl+alt+space"``  — a normal system-wide hotkey via **RegisterHotKey**. Cheap, reliable,
   and the OS enforces exclusivity: if another app already owns the combination, registration
   fails loudly instead of silently doing nothing.
+* ``"num-"``            — a single dedicated key, also via **RegisterHotKey**. No modifier is
+  needed because the key is one nothing else needs: RegisterHotKey swallows it, so numpad
+  minus stops typing "-" while the daemon runs, but the main-row "-" still does. Only keys
+  in ``SOLO_KEYS`` may be bound this way; see the note there.
 * ``"doubletap:rctrl"`` — tap Right Ctrl twice quickly, via a **WH_KEYBOARD_LL** hook. This is
   the Wispr-Flow-style trigger: no combination to remember and no key taken away from other
   apps, because the hook observes and never swallows the key.
@@ -67,6 +71,34 @@ VK_NAMES = {
 }
 VK_NAMES.update({f"f{i}": 0x6F + i for i in range(1, 25)})          # F1..F24
 VK_NAMES.update({f"num{i}": 0x60 + i for i in range(0, 10)})        # numpad 0..9
+# Numpad operators. These are DISTINCT virtual keys from their main-row twins — numpad
+# minus is VK_SUBTRACT (0x6D), while "-" above is VK_OEM_MINUS (0xBD) — so they can be
+# bound without touching the key you actually type dashes with.
+# There is no "num+" spelling because parse_hotkey splits the spec on "+"; write the
+# word instead ("numplus"). "num-" is unambiguous and is spelled either way.
+VK_NAMES.update({
+    "num*": 0x6A, "nummultiply": 0x6A, "numstar": 0x6A,
+    "numplus": 0x6B, "numadd": 0x6B,
+    "numseparator": 0x6C,
+    "num-": 0x6D, "numminus": 0x6D, "numsubtract": 0x6D,
+    "num.": 0x6E, "numdecimal": 0x6E, "numdot": 0x6E,
+    "num/": 0x6F, "numdivide": 0x6F, "numslash": 0x6F,
+})
+
+# Keys that may be bound on their own, with no modifier at all.
+#
+# RegisterHotKey is exclusive and swallows the keypress, so a solo binding takes the key
+# away from every other app for as long as the daemon runs. That is exactly what you want
+# for a dedicated dictation key, and ruinous for a letter — bind "a" alone and you can
+# never type an "a" again. The rule below is what separates the two: every key here has a
+# twin elsewhere on the keyboard (the numpad block duplicates the digit row and the "-",
+# "+", "*", "/", "." keys) or produces no character at all (F13-F24, Scroll Lock, Pause),
+# so surrendering one can never make a character untypeable.
+SOLO_KEYS = (
+    set(range(0x60, 0x70))          # numpad 0-9 and the operators * + , - . /
+    | set(range(0x7C, 0x88))        # F13..F24 — no character, rarely on a keyboard at all
+    | {0x91, 0x13}                  # scroll lock, pause
+)
 
 
 class HotkeyError(ValueError):
@@ -92,8 +124,10 @@ def parse_hotkey(spec: str) -> tuple[int, int]:
             raise HotkeyError(f"{spec!r}: unknown key {p!r}")
     if vk is None:
         raise HotkeyError(f"{spec!r}: no non-modifier key (a hotkey cannot be modifiers alone)")
-    if not mods:
-        raise HotkeyError(f"{spec!r}: needs at least one modifier, or use 'doubletap:<key>'")
+    if not mods and vk not in SOLO_KEYS:
+        raise HotkeyError(f"{spec!r}: needs at least one modifier — a bare key would be taken "
+                          f"away from every other app. Use a numpad key (e.g. 'num-'), F13-F24, "
+                          f"or 'doubletap:<key>' to trigger without a modifier.")
     return mods, vk
 
 
@@ -307,10 +341,23 @@ class HotkeyService:
             _user32.DispatchMessageW(ctypes.byref(msg))
 
 
+# Pretty names for keys whose spec spelling reads badly capitalized ("Num-" -> "Numpad -").
+DISPLAY_NAMES = {
+    "num*": "Numpad *", "nummultiply": "Numpad *", "numstar": "Numpad *",
+    "numplus": "Numpad +", "numadd": "Numpad +",
+    "numseparator": "Numpad ,",
+    "num-": "Numpad -", "numminus": "Numpad -", "numsubtract": "Numpad -",
+    "num.": "Numpad .", "numdecimal": "Numpad .", "numdot": "Numpad .",
+    "num/": "Numpad /", "numdivide": "Numpad /", "numslash": "Numpad /",
+}
+DISPLAY_NAMES.update({f"num{i}": f"Numpad {i}" for i in range(0, 10)})
+
+
 def describe(spec: str) -> str:
     """Human-readable form of a hotkey spec, for the tray tooltip and setup output."""
     s = str(spec or "").strip()
     tap = s.lower().startswith("doubletap:")
     if tap:
         return f"double-tap {s.split(':', 1)[1].replace('rctrl', 'Right Ctrl').replace('lctrl', 'Left Ctrl')}"
-    return " + ".join(p.strip().capitalize() for p in s.split("+") if p.strip())
+    return " + ".join(DISPLAY_NAMES.get(p.strip().lower(), p.strip().capitalize())
+                      for p in s.split("+") if p.strip())

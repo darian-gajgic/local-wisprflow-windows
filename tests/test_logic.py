@@ -178,6 +178,37 @@ class TestHotkeyParsing(unittest.TestCase):
         with self.assertRaises(wf_hotkey.HotkeyError):
             wf_hotkey.parse_hotkey("ctrl+nope")
 
+    def test_numpad_minus_alone(self):
+        # A solo binding: no modifier, and VK_SUBTRACT (0x6D) — NOT the main-row
+        # VK_OEM_MINUS (0xBD), so the "-" you type dashes with is left alone.
+        for spec in ("num-", "numminus", "numsubtract", " NUM- "):
+            mods, vk = wf_hotkey.parse_hotkey(spec)
+            self.assertEqual(mods, 0, spec)
+            self.assertEqual(vk, 0x6D, spec)
+
+    def test_main_row_minus_is_a_different_key(self):
+        self.assertEqual(wf_hotkey.parse_hotkey("ctrl+-")[1], 0xBD)
+
+    def test_numpad_operators_and_digits(self):
+        for spec, vk in (("num*", 0x6A), ("numplus", 0x6B), ("num.", 0x6E),
+                         ("num/", 0x6F), ("num0", 0x60), ("num9", 0x69)):
+            self.assertEqual(wf_hotkey.parse_hotkey(spec)[1], vk, spec)
+
+    def test_solo_keys_accept_modifiers_too(self):
+        mods, vk = wf_hotkey.parse_hotkey("ctrl+alt+num-")
+        self.assertEqual(mods, wf_hotkey.MOD_CONTROL | wf_hotkey.MOD_ALT)
+        self.assertEqual(vk, 0x6D)
+
+    def test_bare_letter_and_main_row_keys_stay_rejected(self):
+        # Binding these solo would make the character untypeable everywhere.
+        for spec in ("a", "-", "f9", "enter", "space"):
+            with self.assertRaises(wf_hotkey.HotkeyError, msg=spec):
+                wf_hotkey.parse_hotkey(spec)
+
+    def test_describe_numpad(self):
+        self.assertEqual(wf_hotkey.describe("num-"), "Numpad -")
+        self.assertEqual(wf_hotkey.describe("ctrl+alt+num-"), "Ctrl + Alt + Numpad -")
+
     def test_doubletap(self):
         self.assertEqual(wf_hotkey.parse_doubletap("doubletap:rctrl"), 0xA3)
         self.assertIsNone(wf_hotkey.parse_doubletap("ctrl+alt+space"))
